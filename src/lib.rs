@@ -78,7 +78,7 @@ pub mod prelude {
     pub use crate::streaming::StreamingTask;
 
     // Re-export macro
-    pub use dioxus_ipc_bridge_macros::ipc_route;
+    pub use deckyfx_dioxus_ipc_bridge_macros::ipc_route;
 
     // Common external deps
     pub use serde_json::{json, Value};

@@ -8,13 +8,13 @@ A powerful HTTP-like IPC bridge for Dioxus applications that enables **bidirecti
 
 ## Features
 
-- **HTTP-like API**: Familiar request-response pattern with methods, URLs, headers, and bodies
-- **Bidirectional**: JavaScript → Rust requests **and** Rust → JavaScript event streaming
+- **HTTP-like API**: Familiar request-response pattern with methods, URLs, path parameters, and query strings
+- **Bidirectional Communication**:
+  - JavaScript → Rust: Request/response pattern
+  - Rust → JavaScript: Event emission via channels
 - **Platform-Agnostic**: Works seamlessly on desktop (webview), web (WASM), and mobile
 - **Type-Safe**: Full Rust type safety with serde serialization
-- **Streaming Support**: Long-running tasks with progress updates (optional feature)
-- **Plugin System**: Extend functionality with custom plugins and middleware
-- **Macro Support**: Ergonomic route handlers with `#[ipc_route]` macro
+- **Router System**: URL-based routing with path parameters (`:param`) and query strings
 - **Builder API**: Clean, fluent interface for configuration
 
 ## Quick Start
@@ -25,81 +25,161 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dioxus = "0.7.0-rc.1"
-dioxus-ipc-bridge = "0.1"
-
-# Optional: Enable streaming support
-# dioxus-ipc-bridge = { version = "0.1", features = ["streaming"] }
+dioxus = "0.7.0"
+dioxus-ipc-bridge = { path = "../dioxus-ipc-bridge" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 ```
 
-### Basic Usage
+### Basic Example
+
+Here's a complete working example based on the dxbasic implementation:
 
 ```rust
 use dioxus::prelude::*;
 use dioxus_ipc_bridge::prelude::*;
-
-// 1. Define a route handler
-struct HelloHandler;
-
-impl RouteHandler for HelloHandler {
-    fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
-        let name = req.path_param("name")
-            .ok_or(IpcError::BadRequest("Missing name".into()))?;
-
-        Ok(IpcResponse::ok(serde_json::json!({
-            "message": format!("Hello, {}!", name)
-        })))
-    }
-}
+use serde_json::json;
 
 fn main() {
-    // 2. Create and configure the bridge
+    dioxus::launch(app);
+}
+
+fn app() -> Element {
+    // 1. Create IPC bridge with timeout configuration
     let bridge = IpcBridge::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build();
 
-    // 3. Set up routes
-    let router = IpcRouter::builder()
-        .route("GET", "/hello/:name", Box::new(HelloHandler))
-        .build();
+    // 2. Set up router with routes
+    let router = use_signal(|| {
+        IpcRouter::builder()
+            // Simple route
+            .route("POST", "/ping", Box::new(PingHandler))
 
-    // 4. Use in your Dioxus app
-    dioxus::launch(App);
-}
+            // Route with path parameter
+            .route("POST", "/greeting/:name", Box::new(GreetingHandler))
 
-#[component]
-fn App() -> Element {
+            // Route with state management
+            .route("POST", "/counter/increment", Box::new(CounterHandler))
+            .route("GET", "/counter/value", Box::new(CounterValueHandler))
+
+            .build()
+    });
+
+    // 3. Initialize bridge and start router
     use_effect(move || {
-        // Initialize bridge
-        let bridge_script = generate_dioxus_bridge_script();
-        dioxus::document::eval(bridge_script);
+        // Start the router's eval loop to listen for messages from JS
+        router.read().start();
 
-        // Listen for requests
+        // Optional: Emit events from Rust to JavaScript
         spawn(async move {
-            let mut eval_instance = dioxus::document::eval(bridge_script);
             loop {
-                if let Ok(request) = eval_instance.recv::<serde_json::Value>().await {
-                    let response = router.dispatch(&request);
-                    let response_json = serde_json::to_value(&response).unwrap();
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-                    // Send response back to JavaScript
-                    let callback_script = format!(
-                        r#"
-                        if (window.dioxusBridge.callbacks.has({})) {{
-                            window.dioxusBridge.callbacks.get({}).resolve({});
-                            window.dioxusBridge.callbacks.delete({});
-                        }}
-                        "#,
-                        request["id"], request["id"], response_json, request["id"]
-                    );
-                    dioxus::document::eval(&callback_script);
-                }
+                // Emit heartbeat event to JavaScript
+                bridge::emit("rust:heartbeat", json!({
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "message": "Heartbeat from Rust"
+                }));
             }
         });
     });
 
+    // 4. Generate and inject bridge script BEFORE other content
+    let bridge_script = bridge.generate_script();
+
     rsx! {
+        // IMPORTANT: Inject bridge script first!
+        script { dangerous_inner_html: "{bridge_script}" }
+
+        // Your app content
         div { "Dioxus IPC Bridge Ready!" }
+    }
+}
+
+// ========== Route Handlers ==========
+
+/// Simple ping-pong handler
+struct PingHandler;
+
+impl RouteHandler for PingHandler {
+    fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let client_time = req.body
+            .as_ref()
+            .and_then(|b| match b {
+                RequestBody::Json(json) => json.get("timestamp").and_then(|t| t.as_str()),
+                _ => None
+            })
+            .unwrap_or("unknown");
+
+        Ok(IpcResponse::ok(json!({
+            "message": "pong",
+            "server_timestamp": timestamp,
+            "client_timestamp": client_time
+        })))
+    }
+}
+
+/// Handler with path parameter
+struct GreetingHandler;
+
+impl RouteHandler for GreetingHandler {
+    fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        // Extract path parameter
+        let name = req.path_param("name")
+            .ok_or_else(|| IpcError::BadRequest("Missing name parameter".to_string()))?;
+
+        // Extract query parameter (optional)
+        let language = req.query_param("lang").map(|s| s.as_str()).unwrap_or("en");
+
+        let greeting = match language {
+            "es" => format!("¡Hola, {}!", name),
+            "fr" => format!("Bonjour, {}!", name),
+            _ => format!("Hello, {}!", name),
+        };
+
+        Ok(IpcResponse::ok(json!({
+            "message": greeting,
+            "name": name,
+            "language": language
+        })))
+    }
+}
+
+/// Handler with global state (simplified - use proper state management in production)
+static mut GLOBAL_COUNTER: i32 = 0;
+
+struct CounterHandler;
+
+impl RouteHandler for CounterHandler {
+    fn handle(&self, _req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        unsafe {
+            GLOBAL_COUNTER += 1;
+
+            // Emit event to all JavaScript listeners
+            bridge::emit("rust:counter:update", json!({
+                "count": GLOBAL_COUNTER,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }));
+
+            Ok(IpcResponse::ok(json!({
+                "count": GLOBAL_COUNTER,
+                "message": "Counter incremented"
+            })))
+        }
+    }
+}
+
+struct CounterValueHandler;
+
+impl RouteHandler for CounterValueHandler {
+    fn handle(&self, _req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        unsafe {
+            Ok(IpcResponse::ok(json!({
+                "count": GLOBAL_COUNTER
+            })))
+        }
     }
 }
 ```
@@ -107,245 +187,400 @@ fn App() -> Element {
 ### JavaScript/React Usage
 
 ```typescript
-// Simple GET request
-const response = await window.dioxusBridge.fetch('ipc://hello/world');
-console.log(response.body.message); // "Hello, world!"
-
-// POST request with body
-const response = await window.dioxusBridge.fetch('ipc://form/submit', {
+// Simple GET/POST request
+const response = await window.dioxusBridge.fetch('ipc://ping', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: { name: 'John', email: 'john@example.com' }
+  body: { timestamp: new Date().toISOString() }
 });
+console.log(response.body.message); // "pong"
+
+// Request with path parameter
+const response = await window.dioxusBridge.fetch('ipc://greeting/World', {
+  method: 'POST'
+});
+console.log(response.body.message); // "Hello, World!"
+
+// Request with query string
+const response = await window.dioxusBridge.fetch('ipc://greeting/World?lang=es', {
+  method: 'POST'
+});
+console.log(response.body.message); // "¡Hola, World!"
+
+// Listen to events from Rust
+const subscription = window.dioxusBridge.IPCBridge.on('rust:heartbeat').subscribe({
+  next: (data) => {
+    console.log('Heartbeat:', data.message);
+  },
+  error: (err) => console.error('Error:', err)
+});
+
+// Cleanup when done
+subscription.unsubscribe();
 ```
 
-## Advanced Usage
+## Core Concepts
 
-### Using the Macro (Simpler Syntax)
+### 1. IpcBridge
+
+The bridge manages the JavaScript-Rust communication layer:
 
 ```rust
-use dioxus_ipc_bridge::prelude::*;
+let bridge = IpcBridge::builder()
+    .timeout(Duration::from_secs(30))  // Request timeout
+    .build();
 
-#[ipc_route(GET, "/user/:id")]
-fn get_user(req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
-    let user_id = req.path_param("id").unwrap();
-
-    Ok(IpcResponse::ok(serde_json::json!({
-        "id": user_id,
-        "name": "John Doe"
-    })))
-}
+// Generate JavaScript initialization code
+let bridge_script = bridge.generate_script();
 ```
 
-### Path Parameters and Query Strings
+**Important**: The bridge script must be injected **before** any JavaScript code that uses `window.dioxusBridge`.
+
+### 2. IpcRouter
+
+Routes IPC requests to appropriate handlers:
 
 ```rust
-// URL: ipc://search/users?query=john&limit=10
-fn search_users(req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
-    let query = req.query_param("query").unwrap_or(&"".to_string());
-    let limit = req.query_param("limit")
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(20);
+let router = IpcRouter::builder()
+    .route("GET", "/path", Box::new(GetHandler))
+    .route("POST", "/path", Box::new(PostHandler))
+    .route("GET", "/users/:id", Box::new(UserHandler))  // Path parameter
+    .build();
 
-    // Search logic here...
-
-    Ok(IpcResponse::ok(serde_json::json!({
-        "results": [],
-        "query": query,
-        "limit": limit
-    })))
-}
+// Start listening for requests
+router.start();
 ```
 
-### Request Body Handling
+### 3. Route Handlers
 
-The bridge supports three body formats:
+Implement the `RouteHandler` trait to handle requests:
 
 ```rust
-fn handle_submission(req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
-    match &req.body {
-        Some(RequestBody::Json(data)) => {
-            // Handle JSON body
+struct MyHandler;
+
+impl RouteHandler for MyHandler {
+    fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        // Extract path parameters
+        let id = req.path_param("id")?;
+
+        // Extract query parameters
+        let filter = req.query_param("filter").unwrap_or(&"all".to_string());
+
+        // Access request body
+        if let Some(RequestBody::Json(data)) = &req.body {
             let name = data["name"].as_str().unwrap();
-            Ok(IpcResponse::ok(serde_json::json!({ "status": "ok" })))
-        },
-        Some(RequestBody::UrlEncoded(fields)) => {
-            // Handle URL-encoded form data
-            let name = fields.get("name").unwrap();
-            Ok(IpcResponse::ok(serde_json::json!({ "status": "ok" })))
-        },
-        Some(RequestBody::Multipart { fields, files }) => {
-            // Handle file uploads
-            for file in files {
-                println!("Uploaded: {}", file.filename);
-            }
-            Ok(IpcResponse::ok(serde_json::json!({ "status": "ok" })))
-        },
-        None => Err(IpcError::BadRequest("Missing body".into()))
+        }
+
+        // Return response
+        Ok(IpcResponse::ok(json!({
+            "status": "success",
+            "data": { "id": id }
+        })))
     }
 }
 ```
 
-### Rust → JavaScript Events
+### 4. Event Emission (Rust → JavaScript)
 
-Emit events from Rust to JavaScript:
+Send events from Rust to JavaScript listeners:
 
 ```rust
-use dioxus_ipc_bridge::bridge::emit;
+use dioxus_ipc_bridge::bridge;
 
-// Emit a notification
-emit("notification", serde_json::json!({
-    "type": "info",
-    "message": "Processing complete!"
+// Emit event
+bridge::emit("event:name", json!({
+    "data": "value"
 }));
 
-// Stream progress updates
-emit("progress", serde_json::json!({
-    "percent": 75,
-    "status": "Almost done..."
+// Emit event with channel namespace
+bridge::emit("rust:counter:update", json!({
+    "count": 42
 }));
 ```
 
-Listen in JavaScript:
+### 5. EnrichedRequest API
 
-```javascript
-// Assuming you have an event system like RxJS
-window.dioxusBridge.IPCBridge.on('notification', (data) => {
-  console.log('Notification:', data.message);
-});
-
-window.dioxusBridge.IPCBridge.on('progress', (data) => {
-  console.log(`Progress: ${data.percent}%`);
-});
-```
-
-### Streaming Support (Optional Feature)
-
-For long-running operations with progress tracking:
-
-```toml
-[dependencies]
-dioxus-ipc-bridge = { version = "0.1", features = ["streaming"] }
-```
+The `EnrichedRequest` provides convenient accessors:
 
 ```rust
-use dioxus_ipc_bridge::streaming::StreamingTask;
+fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+    // Path parameters (from :param in route)
+    let user_id = req.path_param("id")?;
 
-fn start_long_operation(req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
-    let task = StreamingTask::new();
-    let task_id = task.task_id.clone();
+    // Query parameters (from ?key=value)
+    let page = req.query_param("page")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(1);
 
-    // Return task ID immediately
-    let response = IpcResponse::ok(task.initial_response());
+    // Headers
+    let content_type = req.header("Content-Type")?;
 
-    // Process in background
-    spawn(async move {
-        for i in 0..=100 {
-            task.emit_percent(i as f32);
-            sleep(Duration::from_millis(100)).await;
+    // Request body (JSON, URL-encoded, or Multipart)
+    match &req.body {
+        Some(RequestBody::Json(json)) => {
+            let name = json["name"].as_str().unwrap();
         }
-        task.emit_complete(serde_json::json!({ "status": "done" }));
-    });
+        Some(RequestBody::UrlEncoded(fields)) => {
+            let email = fields.get("email").unwrap();
+        }
+        _ => {}
+    }
 
-    Ok(response)
+    Ok(IpcResponse::ok(json!({ "status": "ok" })))
+}
+```
+
+## Advanced Patterns
+
+### Hybrid Request-Response + Event Pattern
+
+For operations that need immediate response AND broadcast updates:
+
+```rust
+impl RouteHandler for CounterHandler {
+    fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        let new_value = increment_counter();
+
+        // 1. Emit event to ALL listeners (broadcast)
+        bridge::emit("counter:updated", json!({
+            "count": new_value
+        }));
+
+        // 2. Return response to requester
+        Ok(IpcResponse::ok(json!({
+            "count": new_value
+        })))
+    }
 }
 ```
 
 JavaScript side:
 
 ```typescript
-import { subscribeToStreamingTask } from './types';
+// Listen for broadcasts (all tabs/windows get this)
+window.dioxusBridge.IPCBridge.on('counter:updated').subscribe({
+  next: (data) => setCounter(data.count)
+});
 
-const response = await ipcRequest('ipc://process/large-file');
-
-subscribeToStreamingTask(response.task_id, {
-  onProgress: (progress) => console.log(`${progress.percent}%`),
-  onComplete: (result) => console.log('Done!', result)
+// Make request (gets response + triggers broadcast)
+const response = await window.dioxusBridge.fetch('ipc://counter/increment', {
+  method: 'POST'
 });
 ```
 
-### Plugin System
+### Platform-Specific Code
 
-Create custom plugins to extend functionality:
+Handle desktop vs web differences:
 
 ```rust
-use dioxus_ipc_bridge::plugin::BridgePlugin;
-
-struct LoggingPlugin;
-
-impl BridgePlugin for LoggingPlugin {
-    fn name(&self) -> &str {
-        "logging"
+/// Get current timestamp (works on both desktop and WASM)
+fn get_timestamp() -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        chrono::Utc::now().to_rfc3339()
     }
 
-    fn on_request(&self, req: &mut IpcRequest) -> Result<(), IpcError> {
-        println!("Request: {} {}", req.method, req.url);
-        Ok(())
-    }
-
-    fn on_response(&self, res: &mut IpcResponse) -> Result<(), IpcError> {
-        println!("Response: {}", res.status);
-        Ok(())
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::new_0().to_iso_string().as_string().unwrap_or_default()
     }
 }
 
-// Use plugin
-let bridge = IpcBridge::builder()
-    .plugin(Box::new(LoggingPlugin))
-    .build();
+// Use platform-specific sleep
+#[cfg(not(target_arch = "wasm32"))]
+tokio::time::sleep(Duration::from_secs(2)).await;
+
+#[cfg(target_arch = "wasm32")]
+{
+    use gloo_timers::future::TimeoutFuture;
+    TimeoutFuture::new(2000).await;
+}
 ```
 
-## API Reference
-
-### Core Types
-
-- **`IpcBridge`**: Bridge configuration and initialization
-- **`IpcRouter`**: HTTP-like router for dispatching requests
-- **`IpcRequest`**: Request from JavaScript to Rust
-- **`IpcResponse`**: Response from Rust to JavaScript
-- **`EnrichedRequest`**: Parsed request with path params and query strings
-- **`RouteHandler`**: Trait for implementing route handlers
-- **`BridgePlugin`**: Trait for creating plugins
-- **`StreamingTask`**: Helper for long-running operations (requires `streaming` feature)
-
-### Builder APIs
+### Error Handling
 
 ```rust
-// IpcBridge builder
-let bridge = IpcBridge::builder()
-    .timeout(Duration::from_secs(30))
-    .custom_script(my_custom_js)
-    .plugin(Box::new(MyPlugin))
-    .build();
+impl RouteHandler for MyHandler {
+    fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        // Bad request (400)
+        let id = req.path_param("id")
+            .ok_or_else(|| IpcError::BadRequest("Missing id".to_string()))?;
 
-// IpcRouter builder
-let router = IpcRouter::builder()
-    .route("GET", "/path/:param", handler)
-    .route("POST", "/submit", handler)
-    .build();
+        // Not found (404)
+        if !user_exists(id) {
+            return Err(IpcError::NotFound(format!("User {} not found", id)));
+        }
+
+        // Custom error with status code
+        Err(IpcError::Custom {
+            status: 403,
+            message: "Access denied".to_string()
+        })
+    }
+}
 ```
 
 ## Platform Support
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Desktop (Windows/macOS/Linux) | ✅ Fully Supported | Uses webview with `dioxus::document::eval()` |
-| Web (WASM) | ✅ Fully Supported | Uses `js_sys::eval()` |
-| Mobile (iOS/Android) | ✅ Fully Supported | Same as desktop |
+| Desktop (Windows/macOS/Linux) | ✅ Fully Supported | Uses `dioxus::document::eval()` with webview |
+| Web (WASM) | ✅ Fully Supported | Uses `js_sys` for web APIs |
+| Mobile (iOS/Android) | ✅ Fully Supported | Same as desktop with mobile webview |
+
+### WASM-Specific Dependencies
+
+For web builds, add these to your `Cargo.toml`:
+
+```toml
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+```
+
+## Common Patterns from dxbasic
+
+### 1. Dynamic Asset Loading
+
+```rust
+struct AssetHandler;
+
+impl RouteHandler for AssetHandler {
+    fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        let name = req.path_param("name")?;
+
+        match name.as_str() {
+            "image" => {
+                let asset = asset!("/assets/sample.png");
+                Ok(IpcResponse::ok(json!({
+                    "name": "sample.png",
+                    "type": "image/png",
+                    "data": asset.to_string()
+                })))
+            }
+            _ => Err(IpcError::NotFound("Asset not found".into()))
+        }
+    }
+}
+```
+
+### 2. Echo Service
+
+```rust
+struct EchoHandler;
+
+impl RouteHandler for EchoHandler {
+    fn handle(&self, req: &EnrichedRequest) -> Result<IpcResponse, IpcError> {
+        let message = req.body
+            .as_ref()
+            .and_then(|b| match b {
+                RequestBody::Json(json) => json.get("message").and_then(|m| m.as_str()),
+                _ => None
+            })
+            .unwrap_or("(empty message)");
+
+        Ok(IpcResponse::ok(json!({
+            "echo": message,
+            "length": message.len(),
+            "reversed": message.chars().rev().collect::<String>(),
+            "uppercase": message.to_uppercase()
+        })))
+    }
+}
+```
+
+### 3. Background Event Emitter
+
+```rust
+use_effect(move || {
+    spawn(async move {
+        let mut count = 0;
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            count += 1;
+
+            bridge::emit("rust:heartbeat", json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "message": format!("Heartbeat #{}", count),
+                "count": count
+            }));
+        }
+    });
+});
+```
+
+## Troubleshooting
+
+### IPC Timeout Errors
+
+If requests timeout:
+1. Verify bridge script loads first: Check console for `[Rust] window.dioxusBridge ready`
+2. Ensure router is started: `router.read().start()`
+3. Check route registration: Routes must match exactly (case-sensitive)
+
+### Events Not Received
+
+If JavaScript doesn't receive events:
+1. Use Observable pattern: `.on(channel).subscribe({ next: ... })`
+2. Check channel names match between Rust and JavaScript
+3. Verify listeners registered before events emitted
+
+### WASM Build Errors
+
+For web builds:
+1. Add `web-sys` dependency with required features
+2. Use platform-specific code (`#[cfg(target_arch = "wasm32")]`)
+3. Replace `std::fs`, `tokio`, `chrono` with web alternatives
+
+## API Reference
+
+### Core Types
+
+- **`IpcBridge`**: Bridge configuration and script generation
+- **`IpcRouter`**: Route management and request dispatching
+- **`IpcRequest`**: Incoming request from JavaScript
+- **`IpcResponse`**: Response to JavaScript
+- **`EnrichedRequest`**: Parsed request with convenient accessors
+- **`RouteHandler`**: Trait for implementing handlers
+- **`IpcError`**: Error types (BadRequest, NotFound, Custom, etc.)
+- **`RequestBody`**: Body variants (Json, UrlEncoded, Multipart)
+
+### Builder APIs
+
+```rust
+// IpcBridge builder
+IpcBridge::builder()
+    .timeout(Duration::from_secs(30))
+    .build();
+
+// IpcRouter builder
+IpcRouter::builder()
+    .route(method, path, handler)
+    .build();
+```
+
+### Response Helpers
+
+```rust
+// Success responses
+IpcResponse::ok(json!({ "data": "value" }))
+IpcResponse::created(json!({ "id": 123 }))
+
+// Error responses
+IpcResponse::bad_request("Invalid input")
+IpcResponse::not_found("Resource not found")
+IpcResponse::custom(403, "Forbidden")
+```
 
 ## Examples
 
-See the `examples/` directory for complete working examples:
-
-- `basic.rs` - Simple GET/POST routes
-- `streaming.rs` - Long-running tasks with progress
-- `custom_plugin.rs` - Plugin implementation
-
-Run an example:
-
-```bash
-cargo run --example basic --features desktop
-```
+See the [dxbasic demo](../dxbasic/) for a complete working example with:
+- Dynamic asset loading
+- Ping-pong request/response
+- Echo service
+- State management with counter
+- Event emission and listening
+- Platform-specific code
 
 ## Contributing
 
@@ -359,3 +594,9 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+## Related
+
+- [dioxus-react-integration](../dioxus-react-integration/) - Serve React apps in Dioxus
+- [dioxus-ipc-bridge-macros](../dioxus-ipc-bridge-macros/) - Procedural macros for route handlers
+- [Dioxus](https://dioxuslabs.com/) - Rust GUI framework
