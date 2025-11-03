@@ -1,10 +1,10 @@
 [package]
 name = "deckyfx-dioxus-ipc-bridge"
 version = "0.1.0"
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+edition = "2021"
+authors = ["Decky Fx"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/deckyfx/LearningDioxus"
 description = "HTTP-like IPC bridge for Dioxus desktop/web/mobile apps with bidirectional JS-Rust communication"
 keywords = ["dioxus", "ipc", "bridge", "webview", "react"]
 categories = ["gui", "web-programming"]
@@ -12,15 +12,15 @@ readme = "README.md"
 
 [dependencies]
 # Core Dioxus
-dioxus = { workspace = true, features = ["document"] }
+dioxus = { version = "0.7.0", default-features = false, features = ["document"] }
 
 # Serialization
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # Utilities
-uuid = { workspace = true }
-base64 = { workspace = true, optional = true }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+base64 = { version = "0.22", optional = true }
 
 # Proc macros
 # Use path for local development, version for published crate
@@ -28,20 +28,20 @@ deckyfx-dioxus-ipc-bridge-macros = { version = "0.1", path = "../dioxus-ipc-brid
 
 # Desktop-only dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { workspace = true }
-chrono = { workspace = true }
+tokio = { version = "1", features = ["time"] }
+chrono = "0.4"
 
 # WASM-only dependencies (web/mobile)
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = { workspace = true }
-wasm-bindgen = { workspace = true }
-web-sys = { workspace = true, features = ["console"] }
-gloo-timers = { workspace = true }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["console"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
 
 [features]
 default = []
 streaming = ["base64"]
 
 [dev-dependencies]
-dioxus = { workspace = true, features = ["desktop", "router"] }
-tokio = { workspace = true, features = ["full"] }
+dioxus = { version = "0.7.0", features = ["desktop", "router"] }
+tokio = { version = "1", features = ["full"] }
