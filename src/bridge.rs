@@ -8,7 +8,7 @@ use crate::plugin::BridgePlugin;
 use std::time::Duration;
 
 /// Configuration for the IPC bridge
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct IpcBridge {
     /// Request timeout duration
     pub timeout: Duration,

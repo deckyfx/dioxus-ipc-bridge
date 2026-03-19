@@ -574,13 +574,13 @@ IpcResponse::custom(403, "Forbidden")
 
 ## Examples
 
-See the [dxbasic demo](../dxbasic/) for a complete working example with:
-- Dynamic asset loading
+See the [dioxus-react-example](https://github.com/deckyfx/dioxus-react-example) for a complete working example with:
+- IPC bridge initialization and route handlers
 - Ping-pong request/response
-- Echo service
-- State management with counter
-- Event emission and listening
-- Platform-specific code
+- Echo service with JSON body processing
+- State management with counter (atomic + event broadcast)
+- Heartbeat event emission (Rust → React)
+- React app with Tailwind CSS loaded via folder assets
 
 ## Contributing
 
@@ -597,6 +597,8 @@ at your option.
 
 ## Related
 
-- [dioxus-react-integration](../dioxus-react-integration/) - Serve React apps in Dioxus
-- [dioxus-ipc-bridge-macros](../dioxus-ipc-bridge-macros/) - Procedural macros for route handlers
+- [dioxus-react-example](https://github.com/deckyfx/dioxus-react-example) - Complete working example app
+- [dioxus-react-integration](https://github.com/deckyfx/LearningDioxus) - Serve React apps in Dioxus with `ReactApp` component
+- [dioxus-react-bridge](https://github.com/deckyfx/dioxus-react-bridge) - React hooks and components for IPC communication
+- [dioxus-ipc-bridge-macros](https://github.com/deckyfx/LearningDioxus) - Procedural macros for route handlers
 - [Dioxus](https://dioxuslabs.com/) - Rust GUI framework
