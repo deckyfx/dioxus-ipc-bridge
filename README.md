@@ -1,5 +1,7 @@
 # dioxus-ipc-bridge
 
+> **DEPRECATED** — This repository is moving to [dx-react/ipc-bridge](https://github.com/dx-react/ipc-bridge). This repo will be archived once the migration is complete.
+
 [![Crates.io](https://img.shields.io/crates/v/dioxus-ipc-bridge.svg)](https://crates.io/crates/dioxus-ipc-bridge)
 [![Documentation](https://docs.rs/dioxus-ipc-bridge/badge.svg)](https://docs.rs/dioxus-ipc-bridge)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
