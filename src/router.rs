@@ -127,8 +127,11 @@ impl IpcRouter {
             Err(err) => return err.into(),
         };
 
-        // Find matching route
+        // Find matching route (checks both method and path pattern)
         for route in &self.routes {
+            if !route.method.eq_ignore_ascii_case(&ipc_request.method) {
+                continue;
+            }
             if let Some(path_params) = parsed_url.match_pattern(&route.pattern) {
                 // Route matched! Build enriched request
                 let enriched_request = EnrichedRequest::new(
@@ -147,7 +150,7 @@ impl IpcRouter {
         }
 
         // No route matched
-        IpcResponse::not_found(&parsed_url.path)
+        IpcResponse::not_found(&format!("{} {}", ipc_request.method, parsed_url.path))
     }
 
     /// Parse raw JSON request from JavaScript into IpcRequest

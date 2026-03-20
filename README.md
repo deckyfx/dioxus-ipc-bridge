@@ -222,6 +222,13 @@ const subscription = window.dioxusBridge.IPCBridge.on('rust:heartbeat').subscrib
 subscription.unsubscribe();
 ```
 
+## Changelog
+
+### v0.2.1
+
+- **Fix**: `IpcRouter` now matches routes by **both HTTP method and path**. Previously, only the path pattern was checked, so `GET /path` and `POST /path` could not coexist — the first registered route always won regardless of method.
+- **Improved**: 404 responses now include the HTTP method for easier debugging (e.g. `POST /unknown-path`).
+
 ## Core Concepts
 
 ### 1. IpcBridge
