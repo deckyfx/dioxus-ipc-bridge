@@ -2,7 +2,9 @@
 
 > **DEPRECATED** — This repository is moving to [dx-react/ipc-bridge](https://github.com/dx-react/ipc-bridge). This repo will be archived once the migration is complete.
 
-[![Crates.io](https://img.shields.io/crates/v/dioxus-ipc-bridge.svg)](https://crates.io/crates/dioxus-ipc-bridge)
+> **Compatibility**: Currently tested with **Dioxus 0.7.3**
+
+[![Crates.io](https://img.shields.io/crates/v/deckyfx-dioxus-ipc-bridge.svg)](https://crates.io/crates/deckyfx-dioxus-ipc-bridge)
 [![Documentation](https://docs.rs/dioxus-ipc-bridge/badge.svg)](https://docs.rs/dioxus-ipc-bridge)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
@@ -27,8 +29,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dioxus = "0.7.0"
-dioxus-ipc-bridge = { path = "../dioxus-ipc-bridge" }
+dioxus = "0.7"
+deckyfx-dioxus-ipc-bridge = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ```
@@ -599,8 +601,8 @@ at your option.
 
 ## Related
 
-- [dioxus-react-example](https://github.com/deckyfx/dioxus-react-example) - Complete working example app
-- [dioxus-react-integration](https://github.com/deckyfx/LearningDioxus) - Serve React apps in Dioxus with `ReactApp` component
-- [dioxus-react-bridge](https://github.com/deckyfx/dioxus-react-bridge) - React hooks and components for IPC communication
-- [dioxus-ipc-bridge-macros](https://github.com/deckyfx/LearningDioxus) - Procedural macros for route handlers
+- [deckyfx/dioxus-react-example](https://github.com/deckyfx/dioxus-react-example) - Complete working example app
+- [deckyfx/dioxus-react-integration](https://github.com/deckyfx/dioxus-react-integration) - Serve React apps in Dioxus with `ReactApp` component
+- [deckyfx/dioxus-react-bridge](https://github.com/deckyfx/dioxus-react-bridge) - React hooks and components for IPC communication
+- [deckyfx/dioxus-ipc-bridge-macros](https://github.com/deckyfx/dioxus-ipc-bridge-macros) - Procedural macros for route handlers
 - [Dioxus](https://dioxuslabs.com/) - Rust GUI framework
